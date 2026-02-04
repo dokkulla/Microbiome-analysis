@@ -1,0 +1,65 @@
+library(pheatmap)
+library(dplyr)
+library(RColorBrewer)
+
+protein_raw <- read.csv("proteomics.CSV", check.names = FALSE)
+
+colnames(protein_raw)[1] <- "GeneSymbol"
+
+# Sample column selection
+sample_cols <- colnames(protein_raw)[grepl("AL|HF", colnames(protein_raw))]
+protein_clean <- protein_raw %>% select(GeneSymbol, all_of(sample_cols))
+
+# Gene name uppering
+protein_clean$GeneSymbol <- toupper(protein_clean$GeneSymbol)
+
+# overlap gene integration
+protein_unique <- protein_clean %>%
+  group_by(GeneSymbol) %>%
+  summarize(across(everything(), \(x) mean(x, na.rm = TRUE))) %>%
+  ungroup()
+
+protein_numeric <- as.data.frame(protein_unique[, -1])
+rownames(protein_numeric) <- make.unique(protein_unique$GeneSymbol)
+
+
+target_text <- c("gene1", "gene2", "gene3", ...)
+
+
+target_proteins_upper <- toupper(unique(target_text))
+
+pca_data_subset <- protein_numeric[rownames(protein_numeric) %in% target_proteins_upper, ]
+pca_data_subset <- na.omit(pca_data_subset)
+pca_data_subset <- pca_data_subset[apply(pca_data_subset, 1, var) > 0, ]
+
+
+heatmap_data <- as.matrix(pca_data_subset)
+sample_names <- colnames(heatmap_data)
+
+annotation_col <- data.frame(Group = groups)
+rownames(annotation_col) <- sample_names
+
+ann_colors <- list(
+  Group = c(Group1 = "#3498db", Group2 = "#e74c3c")
+)
+
+
+save_path <- "Heatmap_Protein_total_rat_nocluster260116.png"
+
+
+pheatmap(heatmap_data, 
+         main = "Protein Expression Heatmap: All",
+         scale = "row",
+         clustering_distance_rows = "correlation",
+         cluster_cols = TRUE,          
+         clustering_method = "complete",
+         annotation_col = annotation_col,
+         annotation_colors = ann_colors,
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(100),
+         show_colnames = TRUE,
+         show_rownames = TRUE,
+         fontsize_row = 6,
+         fontsize_col = 10,
+         angle_col = 45,
+         filename = save_path,
+         width = 8, height = 12)

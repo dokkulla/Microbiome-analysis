@@ -1,2 +1,295 @@
-# This is my qiime2 analysis pipeline.
-  # Qiime2 version. 2025.10.
+# Qiime2 analysis pipeline for 16S rRNA sequencing fastq.
+  # Window ubuntu and Qiime2 version. 2025.10.
+
+# 1. Conda install and update
+
+conda env create \
+  --name qiime2-amplicon-2026.1 \
+  --file https://raw.githubusercontent.com/qiime2/distributions/refs/heads/dev/2026.1/amplicon/released/qiime2-amplicon-ubuntu-latest-conda.yml
+
+# 1.1. Remove previous version if you install previous version
+conda remove -n qiime2-amplicon-2024.10 --all
+
+
+# 2. Qiime2 pipeline
+
+# Activate
+conda activate qiime2-amplicon-2025.4
+cd /mnt/c/Users/Desktop/folder
+
+# 2.1. Import 
+# Forward, reverse fastq file & their manifest file -> PairedEndFastqManifestPhred33V2
+
+qiime tools import \
+--type 'SampleData[PairedEndSequencesWithQuality]' \
+--input-path manifest.tsv \
+--output-path demux-paired-end-sequences.qza \
+--input-format PairedEndFastqManifestPhred33V2
+
+# Raw data visualization
+qiime demux summarize \
+ --i-data demux-paired-end-sequences.qza \
+ --o-visualization demux-paired-end-sequences.qzv
+
+
+# 2.2. ASV using DADA2 ( take too long time !! )
+
+qiime dada2 denoise-paired \
+--i-demultiplexed-seqs demux-paired-end-sequences.qza \
+--p-trim-left-f 0 \
+--p-trim-left-r 0 \
+--p-trunc-len-f 250 \
+--p-trunc-len-r 200 \
+--o-table table-dada2.qza \
+--o-representative-sequences rep-seqs.qza \
+--o-denoising-stats stats-dada2.qza
+
+# in visualization file, if you find some noise, add primer bp trim f, r.
+# in visualization file, middle of box quality score = 30 -> trunc f, r. eg) 250, 200
+# (f + r length) - amplicon length bp > 20 bp
+
+# visualization
+qiime metadata tabulate \
+--m-input-file stats-dada2.qza \
+--o-visualization stats-dada2.qzv
+
+# 2.3. Feature table & feature table summary
+
+qiime feature-table summarize-plus \
+--i-table table-dada2.qza \
+--m-metadata-file metadata.tsv \
+--o-summary table-dada2.qzv \
+--o-sample-frequencies sample-freq.qza \
+--o-feature-frequencies repseqs-freq.qza
+
+# metadata format id, group, sex, etc.
+# id must match fastq sample id.
+
+
+qiime feature-table tabulate-seqs \
+--i-data rep-seqs.qza \
+--m-metadata-file repseqs-freq.qza \
+--o-visualization rep-seqs.qzv
+
+# rep-seqs.qzv -> ASV length, feature sequence and length
+
+
+# 2.4. Filter
+
+qiime feature-table filter-samples \
+--i-table table-dada2.qza \
+--p-min-frequency 10 \
+--o-filtered-table table-10read.qza
+
+# filtered sample frequency < 10
+
+qiime feature-table summarize \
+--i-table table-10read.qza \
+--m-sample-metadata-file metadata.tsv \
+--o-visualization table-10read.qzv
+
+
+
+
+qiime filter-table filter-features \
+  --i-table table.qza \
+  --p-min-samples 2 \
+  --o-filtered-table sample-contingency-filtered-data.qza
+
+# filtered sample feature number < 2
+
+# Visualization
+qiime feature-table summarize \
+--i-table table-100read.qza \
+--m-sample-metadata-file sample-metadata_ata.tsv \
+--o-visualization table-100read.qzv
+
+
+
+# 2.5. Phylogenetic tree for phylogenetic diversity analysis
+
+qiime phylogeny align-to-tree-mafft-fasttree \
+--i-sequences rep-seqs.qza \
+--o-alignment aligned-rep-seqs.qza \
+--o-masked-alignment masked-aligned-rep-seqs.qza \
+--o-tree unrooted-tree.qza \
+--o-rooted-tree rooted-tree.qza
+
+
+# 2.6. Alpha and beta diversity analysis in qiime2
+
+# core analysis 
+qiime diversity core-metrics-phylogenetic \
+--i-phylogeny rooted-tree.qza \
+--i-table table-100read.qza \
+--p-sampling-depth 102 \
+--m-metadata-file sample-metadata_ata.tsv \
+--output-dir core-metrics-results
+
+# alpha diversity
+qiime diversity alpha-group-significance \
+--i-alpha-diversity core-metrics-results/faith_pd_vector.qza \
+--m-metadata-file sample-metadata_ata.tsv \
+--o-visualization core-metrics-results/faith-pd-group-significance.qzv
+
+# eveness analysis
+qiime diversity alpha-group-significance \
+--i-alpha-diversity core-metrics-results/evenness_vector.qza \
+--m-metadata-file sample-metadata_ata.tsv \
+--o-visualization core-metrics-results/evenness-group-significance.qzv
+
+# alpha diversity ; continuous variables
+qiime diversity alpha-correlation \
+--i-alpha-diversity core-metrics-results/shannon_vector.qza \
+--p-method spearman \
+--m-metadata-file sample-metadata_ata.tsv \
+--o-visualization core-metrics-results/qt_shannon.qzv
+
+# beta diversity; PERMANVOA
+qiime diversity beta-group-significance \
+--i-distance-matrix core-metrics-results/unweighted_unifrac_distance_matrix.qza \
+--m-metadata-file sample-metadata_ata.tsv \
+--m-metadata-column Vegetation \
+--o-visualization core-metrics-results/unweighted-unifrac-vegetation-significance.qzv \
+--p-pairwise
+
+# Unifrac distance
+qiime diversity beta-group-significance \
+--i-distance-matrix core-metrics-results/weighted_unifrac_distance_matrix.qza \
+--m-metadata-file sample-metadata_ata.tsv \
+--m-metadata-column Vegetation \
+--o-visualization core-metrics-results/weighted-unifrac-vegetation-significance.qzv \
+--p-pairwise
+
+
+
+# 2.7. Taxonomic analysis
+# match DB
+qiime feature-classifier classify-sklearn \
+--i-classifier silva-138.2-ssu-nr99-tax-341f-806r-classifier.qza \
+--i-reads rep-seqs.qza \
+--o-classification silva.v3v4_taxonomy.qza
+
+# visualization
+qiime metadata tabulate \
+--m-input-file silva.v3v4_taxonomy.qza \
+--o-visualization silva.v3v4_taxonomy.qzv
+
+# taxonomy composition and bar chart
+qiime taxa barplot \
+--i-table table-10read.qza \
+--i-taxonomy silva.v3v4_taxonomy.qza \
+--m-metadata-file metadata.tsv \
+--o-visualization taxa-bar-plots_silva.qzv
+
+
+# 2.8. Differential abundance test among the groups
+
+# taxa collapsing; L2 (phylum), L3 (class), L4 (order), L5 (family), L6 (genus)
+qiime taxa collapse \
+--i-table table-100read.qza \
+--i-taxonomy greengene2_V4_taxonomy.qza \
+--p-level 2 \
+--o-collapsed-table table_L2.qza
+
+# level 2 = feature table for phylum
+
+qiime taxa collapse \
+--i-table table-10read.qza \
+--i-taxonomy silva.v3v4_taxonomy.qza \
+--p-level 3 \
+--o-collapsed-table table_L3.qza
+qiime taxa collapse \
+--i-table table-10read.qza \
+--i-taxonomy silva.v3v4_taxonomy.qza \
+--p-level 4 \
+--o-collapsed-table table_L4.qza
+qiime taxa collapse \
+--i-table table-10read.qza \
+--i-taxonomy silva.v3v4_taxonomy.qza \
+--p-level 5 \
+--o-collapsed-table table_L5.qza
+qiime taxa collapse \
+--i-table table-10read.qza \
+--i-taxonomy silva.v3v4_taxonomy.qza \
+--p-level 6 \
+--o-collapsed-table table_L6.qza
+
+
+#===========================================
+#===========================================
+
+# ANCOM-BC;
+
+qiime composition ancombc \
+--i-table table_L6.qza \
+--m-metadata-file metadata.tsv \
+--p-formula 'Group' \
+--o-differentials ancom-group_L6.qza
+
+
+#formula = variant to compare
+
+qiime composition da-barplot \
+  --i-data ancom-group_L6.qza \
+  --p-significance-threshold 0.05 \
+  --p-level-delimiter ';' \
+  --o-visualization ancom-group_L6.qzv
+
+# q-value < 0.05 and significant feature -> graph
+
+
+qiime composition tabulate \
+	--i-data ancom-group_L6.qza \
+	--o-visualization ancom-group_table_L6.qzv
+
+# total results table file
+
+# Reference; specific group -> control
+
+qiime composition ancombc \
+--i-table table_L6.qza   \
+--m-metadata-file metadata.tsv   \
+--p-formula 'Group'   \
+--p-reference-levels 'Group::Control'   \
+--o-differentials ancom-group_L6.qza
+
+
+# 2.9. Exporting
+
+# make biom table
+qiime tools export \
+--input-path table-10read.qza \
+--output-path exported_biom
+
+# taxonomy export 
+qiime tools export \
+--input-path silva.v3v4_taxonomy.qza \
+--output-path exported_biom
+
+
+# header name change: FeatureID Taxon Condifence -> #OTUID taxonomy confidence
+
+biom add-metadata \
+-i ./exported_biom/feature-table.biom \
+-o ./table-with-taxonomy.biom \
+--observation-metadata-fp ./biom-taxonomy.tsv \
+--sc-separated taxonomy
+
+
+# 2.9. Relative abundance file
+
+# Read count data -> relative abundance data
+qiime feature-table relative-frequency \
+--i-table table_L6.qza \
+--o-relative-frequency-table R-L6-table.qza
+
+# Relative abundance data export to .biom
+qiime tools export \
+--input-path R-L6-table.qza \
+--output-path R_L6
+
+# format change: .biom -> .tsv
+biom convert -i feature-table.biom -o R-L6-table.tsv --to-tsv
+
+

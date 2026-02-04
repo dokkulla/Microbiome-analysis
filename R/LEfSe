@@ -1,0 +1,61 @@
+library(tidyverse)
+library(ggplot2)
+
+
+results <- data.frame(
+  Full_Name = raw_names, 
+  Genus = final_names, 
+  p_val = NA, 
+  lda_score = NA, 
+  Group = NA
+)
+
+microbe_data <- as.data.frame(t(microbe_raw))
+
+for(i in 1:ncol(microbe_data)) {
+  # Kruskal-Wallis Test
+  kw_test <- kruskal.test(microbe_data[, i] ~ group_info)
+  results$p_val[i] <- kw_test$p.value
+  
+  means <- tapply(microbe_data[, i], group_info, mean)
+  results$Group[i] <- names(which.max(means))
+  
+  # LDA Score 
+  diff <- abs(means[1] - means[2])
+  results$lda_score[i] <- log10(1 + diff * 100) * 2
+}
+
+# Filter (p < 0.05)
+lefse_final <- results %>%
+  filter(p_val < 0.05)
+
+# 
+lefse_final <- lefse_final %>%
+  mutate(plot_score = ifelse(Group == "Group1", -lda_score, lda_score))
+
+p <- ggplot(lefse_final, aes(x = reorder(Genus, plot_score), y = plot_score, fill = Group)) +
+  geom_bar(stat = "identity", width = 0.7, color = "black", linewidth = 0.7) + 
+  geom_text(aes(
+    y = ifelse(plot_score > 0, -offset, offset), 
+    label = Genus, 
+    hjust = ifelse(plot_score > 0, 1, 0)
+  ), size = 3.8, fontface = "italic") +
+  coord_flip() + 
+  scale_fill_manual(values = c("Group1" = "#4DAF4A", "Group2" = "#E41A1C"),
+                    labels = c("Group1" = "G1", "Group2" = "G2")) +
+  
+  geom_hline(yintercept = 0, linetype = "solid", color = "black") +
+  theme_classic(base_size = 14) +
+  labs(x = NULL, y = "LDA SCORE (log 10)", fill = "Group") +
+  
+  scale_y_continuous(labels = function(x) abs(x), 
+                     expand = expansion(mult = c(0.12, 0.12))) + 
+  
+  theme(
+    panel.grid.major.x = element_line(color = "grey90", linetype = "dotted"),
+    axis.text.y = element_blank(),
+    axis.line.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    legend.position = "top",
+    legend.justification = "center"
+  )

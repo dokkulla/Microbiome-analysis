@@ -1,0 +1,48 @@
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(vegan)
+
+
+microbe_raw <- read.csv("genus.csv", row.names = 1, check.names = FALSE)
+data <- read.table("metadata.txt", header = TRUE, sep = "\t")
+
+rownames(data) <- data[, 1]
+
+OTU  <- otu_table(as.matrix(microbe_raw), taxa_are_rows = TRUE)
+META <- sample_data(data)
+ps   <- phyloseq(OTU, META)
+
+ps_rel <- transform_sample_counts(ps, function(x) x / sum(x))
+dist_bray <- distance(ps_rel, method = "bray")
+
+
+pcoa_res <- ordinate(ps_rel, method = "PCoA", distance = dist_bray)
+
+p_beta <- plot_ordination(ps_rel, pcoa_res, color = "Group") +
+  geom_point(size = 4, alpha = 0.7) +      
+  stat_ellipse(type = "t", linetype = 2) + 
+  theme_minimal() +
+  scale_color_manual(values = c("Normal" = "#00BFC4", "Obesity" = "#F8766D")) +
+  labs(title = "PCoA based on Bray-Curtis Distance",
+       color = "Group") +
+  theme(
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 13),
+    panel.border = element_rect(color = "black", fill = NA, size = 0.5)
+  )
+
+# PERMANOVA
+otu_mat <- as(otu_table(ps_rel), "matrix")
+if (taxa_are_rows(ps_rel)) { otu_mat <- t(otu_mat) }
+
+metadata <- as(sample_data(ps_rel), "data.frame")
+
+permanova_res <- adonis2(otu_mat ~ Group, data = metadata, method = "bray")
+
+print("--- PERMANOVA Test Results ---")
+print(permanova_res)

@@ -1,0 +1,55 @@
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+microbe_raw <- read.csv("genus.csv", row.names = 1, check.names = FALSE)
+data <- read.table("metadata.txt", header = TRUE, sep = "\t")
+
+rownames(data) <- data[, 1]
+
+
+OTU  <- otu_table(as.matrix(microbe_raw), taxa_are_rows = TRUE)
+META <- sample_data(data)
+ps   <- phyloseq(OTU, META)
+
+alpha_values <- estimate_richness(ps, measures = c("Observed", "Chao1", "Shannon", "Simpson"))
+alpha_values$Group <- sample_data(ps)$Group
+
+alpha_summary <- alpha_values %>%
+  group_by(Group) %>%
+  summarise(across(everything(), list(mean = ~mean(.), sd = ~sd(.)), .names = "{.col}_{.fn}"))
+
+
+metrics <- c("Observed", "Chao1", "Shannon", "Simpson")
+
+wilcox_results <- map_dfr(metrics, function(m) {
+  res <- wilcox.test(as.formula(paste(m, "~ Group")), data = alpha_values)
+  data.frame(Metric = m, W = res$statistic, p_value = res$p.value)
+})
+
+
+
+my_colors <- c("Normal" = "#00BFC4", "Obesity" = "#F8766D")
+
+p <- plot_richness(ps, 
+                   x = "Group", 
+                   measures = metrics,
+                   color = "Group") +
+  geom_boxplot(aes(fill = Group), alpha = 0.5, outlier.shape = NA) + 
+  theme_minimal() +
+  labs(title = NULL, x = NULL, y = "Alpha Diversity Index") +
+  theme(
+    strip.text = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(size = 12),
+    axis.title.y = element_text(size = 13),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 13),
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5)
+  ) +
+
+  scale_color_manual(values = my_colors) +
+  scale_fill_manual(values = my_colors)
+
+print(p)
